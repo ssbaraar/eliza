@@ -22,6 +22,7 @@ import {
 import { defaultCharacter } from "./defaultCharacter.ts";
 
 import { bootstrapPlugin } from "@elizaos/plugin-bootstrap";
+import { hederaPlugin } from "@elizaos/plugin-hedera";
 import JSON5 from 'json5';
 
 import fs from "fs";
@@ -195,7 +196,7 @@ async function jsonToCharacter(
 ): Promise<Character> {
     validateCharacterConfig(character);
 
-    // .id isn't really valid
+    // Apply environment variable overrides
     const characterId = character.id || character.name;
     const characterPrefix = `CHARACTER.${characterId
         .toUpperCase()
@@ -206,36 +207,24 @@ async function jsonToCharacter(
             const settingKey = key.slice(characterPrefix.length);
             return { ...settings, [settingKey]: value };
         }, {});
+    
     if (Object.keys(characterSettings).length > 0) {
-        character.settings = character.settings || {};
         character.settings.secrets = {
             ...characterSettings,
             ...character.settings.secrets,
         };
     }
+    
     // Handle plugins
     character.plugins = await handlePluginImporting(character.plugins);
-    elizaLogger.info(character.name, 'loaded plugins:', "[\n    " + character.plugins.map(p => `"${p.npmName}"`).join(", \n    ") + "\n]");
-
-    // Handle Post Processors plugins
-    if (character.postProcessors?.length > 0) {
-        elizaLogger.info(character.name, 'loading postProcessors', character.postProcessors);
-        character.postProcessors = await handlePluginImporting(character.postProcessors);
-    }
-
+    
     // Handle extends
     if (character.extends) {
-        elizaLogger.info(
-            `Merging  ${character.name} character with parent characters`
-        );
         for (const extendPath of character.extends) {
             const baseCharacter = await loadCharacter(
                 path.resolve(path.dirname(filePath), extendPath)
             );
             character = mergeCharacters(baseCharacter, character);
-            elizaLogger.info(
-                `Merged ${character.name} with ${baseCharacter.name}`
-            );
         }
     }
     return character;
@@ -337,18 +326,16 @@ export async function loadCharacters(
 
     const loadedCharacters: Character[] = [];
 
-    if (characterPaths?.length > 0) {
-        for (const characterPath of characterPaths) {
-            try {
-                const character: Character = await loadCharacterTryPath(
-                    characterPath
-                );
-                loadedCharacters.push(character);
-            } catch (e) {
-                process.exit(1);
-            }
-        }
-    }
+    // Remove/comment out local character loading
+    // if (charactersArg) {
+    //     const characterPaths = await readCharactersFromStorage(
+    //         commaSeparatedStringToArray(charactersArg)
+    //     );
+    //     for (const characterPath of characterPaths) {
+    //         const character = await loadCharacterTryPath(characterPath);
+    //         loadedCharacters.push(character);
+    //     }
+    // }
 
     if (hasValidRemoteUrls()) {
         elizaLogger.info("Loading characters from remote URLs");
@@ -359,6 +346,7 @@ export async function loadCharacters(
             const characters = await loadCharactersFromUrl(characterUrl);
             loadedCharacters.push(...characters);
         }
+        return loadedCharacters;
     }
 
     if (loadedCharacters.length === 0) {
@@ -383,11 +371,11 @@ async function handlePluginImporting(plugins: string[]) {
                             .replace("@elizaos-plugins/plugin-", "")
                             .replace(/-./g, (x) => x[1].toUpperCase()) +
                         "Plugin"; // Assumes plugin function is camelCased with Plugin suffix
-                    if (!importedPlugin[functionName] && !importedPlugin.default) {
+                    if (!importedPlugin[functionName] && !(importedPlugin as any).default) {
                       elizaLogger.warn(plugin, 'does not have an default export or', functionName)
                     }
                     return {...(
-                        importedPlugin.default || importedPlugin[functionName]
+                        (importedPlugin as any).default || importedPlugin[functionName]
                     ), npmName: plugin };
                 } catch (importError) {
                     console.error(
@@ -627,9 +615,8 @@ export async function createAgent(
         // character.plugins are handled when clients are added
         plugins: [
             bootstrapPlugin,
-        ]
-            .flat()
-            .filter(Boolean),
+            hederaPlugin,
+        ] as Plugin[],
         providers: [],
         managers: [],
         fetch: logFetch,
@@ -803,10 +790,16 @@ const checkPortAvailable = (port: number): Promise<boolean> => {
     });
 };
 
-const hasValidRemoteUrls = () =>
-    process.env.REMOTE_CHARACTER_URLS &&
-    process.env.REMOTE_CHARACTER_URLS !== "" &&
-    process.env.REMOTE_CHARACTER_URLS.startsWith("http");
+const hasValidRemoteUrls = () => {
+    const isValid = process.env.REMOTE_CHARACTER_URLS &&
+        process.env.REMOTE_CHARACTER_URLS !== "" &&
+        process.env.REMOTE_CHARACTER_URLS.startsWith("http");
+    elizaLogger.debug("Remote URL check:", { 
+        REMOTE_CHARACTER_URLS: process.env.REMOTE_CHARACTER_URLS,
+        isValid 
+    });
+    return isValid;
+};
 
 /**
  * Post processing of character after loading
