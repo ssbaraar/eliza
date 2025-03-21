@@ -19,6 +19,8 @@
     },
     "dependencies": {
         "@elizaos/client-direct": "workspace:*",
+        "@elizaos/plugin-hedera": "workspace:*",
+        "@elizaos/plugin-xrpl": "workspace:*",
         "@elizaos/core": "workspace:*",
         "@elizaos/plugin-bootstrap": "workspace:*",
         "@types/node": "^22.13.5",
